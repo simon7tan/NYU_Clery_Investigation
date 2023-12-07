@@ -1,0 +1,426 @@
+---
+title: "Clery_investigation"
+author: "Simon Tan"
+date: "2023-10-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#import NYU campus safety crime logs
+```{r}
+library(dplyr)
+
+Clery_2016 <- read.csv("Clery_2016_clean.csv")
+Clery_2017 <- read.csv("Clery_2017_clean.csv")
+Clery_2018 <- read.csv("Clery_2018_clean.csv")
+Clery_2019 <- read.csv("Clery_2019_clean.csv")
+Clery_2020 <- read.csv("Clery_2020_clean.csv")
+Clery_2021 <- read.csv("Clery_2021_clean.csv")
+Clery_2022 <- read.csv("Clery_2022_clean.csv")
+
+files_Clery_2023 <- list.files("NYU_log_2023", pattern = ".csv", full.names = TRUE)
+#To align with NYPD data, which is updated to June 2023, this file only includes crimes from the first six months in 2023
+Clery_2023 <- bind_rows(lapply(files_Clery_2023, read.csv))
+
+Clery_historic <- bind_rows(Clery_2016, Clery_2017, Clery_2018, Clery_2019, Clery_2020, Clery_2021, Clery_2022)
+
+#write.csv(Clery_historic, "Clery_historic.csv", row.names = FALSE)
+#write.csv(Clery_2023, "Clery_2023.csv", row.names = FALSE)
+```
+
+#import and clean NYPD historic complaints
+```{r}
+NYPD_complaints <- read.csv("NYPD_Complaint_Data_Historic.csv")
+NYPD_2023 <- read.csv("NYPD_Complaint_Data_Current.csv")
+NYPD_2023$HOUSING_PSA <- as.character(NYPD_2023$HOUSING_PSA)
+
+NYPD_complaints$RPT_DT <- as.Date(NYPD_complaints$RPT_DT, format = "%m/%d/%Y")
+NYPD_2023$RPT_DT <- as.Date(NYPD_2023$RPT_DT, format = "%m/%d/%Y")
+
+library(lubridate)
+
+NYPD_historic <- NYPD_complaints %>%
+  filter(RPT_DT >= ymd("2016-01-01") & RPT_DT <= ymd("2022-12-31")) %>%
+  filter(!is.na(Latitude)) %>%
+  filter(!is.na(Longitude))
+NYPD_2023 <- NYPD_2023 %>%
+  filter(!is.na(Latitude)) %>%
+  filter(!is.na(Longitude))
+
+#write.csv(NYPD_historic, "NYPD_historic.csv", row.names = FALSE)
+```
+
+#NYPD-recorded crimes that took place in NYU Clery geography
+```{r}
+library(sf)
+
+Clery_geography <- st_read("Clery_geography/Clery_geography.shp")
+#st_crs(Clery_geography)
+
+NYPD_sf <- NYPD_historic %>%
+  select(CMPLNT_NUM, Latitude, Longitude)
+
+NYPD_sf <- st_as_sf(NYPD_sf, coords = c("Longitude", "Latitude"), crs = 4326)
+
+NYPD_sf <- st_transform(NYPD_sf, crs = 3857)
+
+NYPD_Clery_historic <- NYPD_sf[
+  apply(
+    st_intersects(NYPD_sf, Clery_geography, sparse = FALSE),
+    1, any), ]
+```
+
+#slice NYPD record into years
+```{r}
+NYPD_2016 <- NYPD_historic %>% filter(RPT_DT >= ymd("2016-01-01") & RPT_DT <= ymd("2016-12-31"))
+NYPD_2017 <- NYPD_historic %>% filter(RPT_DT >= ymd("2017-01-01") & RPT_DT <= ymd("2017-12-31"))
+NYPD_2018 <- NYPD_historic %>% filter(RPT_DT >= ymd("2018-01-01") & RPT_DT <= ymd("2018-12-31"))
+NYPD_2019 <- NYPD_historic %>% filter(RPT_DT >= ymd("2019-01-01") & RPT_DT <= ymd("2019-12-31"))
+NYPD_2020 <- NYPD_historic %>% filter(RPT_DT >= ymd("2020-01-01") & RPT_DT <= ymd("2020-12-31"))
+NYPD_2021 <- NYPD_historic %>% filter(RPT_DT >= ymd("2021-01-01") & RPT_DT <= ymd("2021-12-31"))
+NYPD_2022 <- NYPD_historic %>% filter(RPT_DT >= ymd("2022-01-01") & RPT_DT <= ymd("2022-12-31"))
+```
+
+#NYPD_Clery in each year
+```{r}
+NYPD_list <- list(NYPD_2016 %>% select(CMPLNT_NUM, Latitude, Longitude),
+                  NYPD_2017 %>% select(CMPLNT_NUM, Latitude, Longitude),
+                  NYPD_2018 %>% select(CMPLNT_NUM, Latitude, Longitude),
+                  NYPD_2019 %>% select(CMPLNT_NUM, Latitude, Longitude),
+                  NYPD_2020 %>% select(CMPLNT_NUM, Latitude, Longitude),
+                  NYPD_2021 %>% select(CMPLNT_NUM, Latitude, Longitude),
+                  NYPD_2022 %>% select(CMPLNT_NUM, Latitude, Longitude),
+                  NYPD_2023 %>% select(CMPLNT_NUM, Latitude, Longitude))
+
+NYPD_list <- lapply(NYPD_list,
+                       function(data) {
+                         st_as_sf(data, coords = c("Longitude", "Latitude"), crs = 4326)
+                       })
+
+NYPD_list <- lapply(NYPD_list,
+                       function(data) {
+                         st_transform(data, crs = 3857)
+                       })
+
+NYPD_list <- lapply(NYPD_list,
+                    function(data) {
+                      intersects <- data[
+                        apply(st_intersects(data, Clery_geography, sparse = FALSE),
+                              1, any), ]
+                      return(intersects)
+                      })
+
+NYPD_2016_Clery <- merge(NYPD_list[[1]], NYPD_2016, by = "CMPLNT_NUM")
+NYPD_2017_Clery <- merge(NYPD_list[[2]], NYPD_2017, by = "CMPLNT_NUM")
+NYPD_2018_Clery <- merge(NYPD_list[[3]], NYPD_2018, by = "CMPLNT_NUM")
+NYPD_2019_Clery <- merge(NYPD_list[[4]], NYPD_2019, by = "CMPLNT_NUM")
+NYPD_2020_Clery <- merge(NYPD_list[[5]], NYPD_2020, by = "CMPLNT_NUM")
+NYPD_2021_Clery <- merge(NYPD_list[[6]], NYPD_2021, by = "CMPLNT_NUM")
+NYPD_2022_Clery <- merge(NYPD_list[[7]], NYPD_2022, by = "CMPLNT_NUM")
+NYPD_2023_Clery <- merge(NYPD_list[[8]], NYPD_2023, by = "CMPLNT_NUM")
+
+NYPD_2023_Clery$HOUSING_PSA <- as.character(NYPD_2023_Clery$HOUSING_PSA)
+#write.csv(NYPD_2023_Clery, "NYPD_2023_Clery.csv", row.names = FALSE)
+```
+
+#on-campus historic crime log from 2021-2023
+```{r}
+#The result from last chunk shown that NYPD only recorded a total number of 21 crimes on NYU campus from 2016 to 2020, which, comparing to the data from 2021 to 2023, was impossible. In response, only data from year 2021 to 2023 will be used in this investigation.
+
+Clery_historic_21_23 <- bind_rows(Clery_2021, Clery_2022, Clery_2023)
+Clery_historic_21_23$Date <- mdy(Clery_historic_21_23$Date)
+
+NYPD_Clery_21_23 <- bind_rows(NYPD_2021_Clery, NYPD_2022_Clery, NYPD_2023_Clery)
+#write.csv(NYPD_Clery_21_23, "NYPD_Clery_21_23.csv", row.names = FALSE)
+```
+
+#crime cases 2023, NYPD, Clery, mutual - map
+```{r}
+Clery_2023_address <- read.csv("Clery_2023_address.csv")
+#manually inserted a column containing the address of the buildings
+
+Clery_2023_address$Address[is.na(Clery_2023_address$Address)] <- "NA"
+
+library(ggmap)
+
+register_google("AIzaSyB6oP9TF4J4I978Ixyy1B501swrUvCGSFg")
+
+Clery_2023_address <- Clery_2023_address %>%
+  mutate(geopoints = geocode(Address))
+
+#write.csv(Clery_2023_address, "Clery_2023_geocodes.csv", row.names = FALSE)
+#manually enter the geocodes for the addresses that are not machine-readable
+
+library(leaflet)
+
+Clery_2023_geocodes <- read.csv("Clery_2023_geocodes.csv")
+
+mutual_2023 <- Clery_2023_geocodes %>%
+  filter(NYPD == "1") %>%
+  select(Longitude, Latitude) %>%
+  group_by(Latitude, Longitude) %>%
+  count() %>%
+  rename(case = n)
+
+Clery_only_2023 <- Clery_2023_geocodes %>%
+  filter(is.na(NYPD)) %>%
+  select(Longitude, Latitude) %>%
+  mutate(Type = "Clery")
+
+NYPD_only_2023 <- NYPD_2023_Clery %>%
+  select(Longitude, Latitude) %>%
+  mutate(Type = "NYPD")
+
+NYPD_only_2023 <- as.data.frame(NYPD_only_2023)
+
+mapping_2023 <- bind_rows(Clery_only_2023, NYPD_only_2023) %>%
+  select(-geometry) %>%
+  filter(!is.na(Latitude)) %>%
+  mutate(latitude = as.numeric(substr(Latitude, 1, 7)),
+         longitude = as.numeric(substr(Longitude, 1, 8))) %>%
+  select(Type, latitude, longitude) %>%
+  group_by(latitude, longitude, Type) %>%
+  count() %>%
+  mutate(latitude = ifelse(latitude == 40.7306, 40.7309, latitude),
+         longitude = ifelse(longitude == -73.9988, -73.9976, longitude)) %>%
+  rename(incidents = n)
+
+pal<- colorFactor(palette=c("#015db8", "#410e67"),
+                  levels=c("NYPD", "Clery"))
+
+Clery_vs_NYPD <- leaflet() %>%
+  setView(lng = -73.9937, lat = 40.7291, zoom = 16) %>%
+  addProviderTiles(providers$CartoDB.VoyagerNoLabels) %>%
+  addCircleMarkers(
+    data = mapping_2023,
+    ~longitude, 
+    ~latitude,
+    radius = ~incidents*0.7,
+    weight = 1,
+    opacity = 0.6,
+    fillOpacity = 0.5,
+    color = ~pal(Type)) %>%
+  addCircleMarkers(
+    data = mutual_2023,
+    ~Longitude, 
+    ~Latitude,
+    weight = 1,
+    radius = ~case*0.8,
+    opacity = 1,
+    fillOpacity = 0.9,
+    color = "#ff8243") %>%
+  addLegend(
+    position = "bottomright",
+    colors = c("#015db8", "#410e67", "#ff8243"),
+    labels = c("NYPD", "Campus Safety", "mutual"),
+    opacity = 0.8)
+
+library(htmlwidgets)
+saveWidget(Clery_vs_NYPD, file="comparison_map.html")
+```
+
+#underreporting evidences
+```{r}
+library(stringr)
+
+#write.csv(Clery_historic_21_23, "Clery_21_23.csv", row.names = FALSE)
+
+NYPD_21_23 <- NYPD_complaints %>%
+  filter(RPT_DT >= ymd("2021-01-01") & RPT_DT <= ymd("2022-12-31")) %>%
+  bind_rows(NYPD_2023) %>%
+  filter(!is.na(Latitude)) %>%
+  filter(!is.na(Longitude))
+
+Bobst <- st_read("Bobst/Bobst.shp")
+st_crs(Bobst)
+Founders <- st_read("Founders/Founders.shp")
+st_crs(Founders)
+Paulson <- st_read("Paulson/Paulson.shp")
+st_crs(Paulson)
+ThirdNorth <- st_read("ThirdNorth/ThirdNorth.shp")
+st_crs(ThirdNorth)
+University <- st_read("University/University.shp")
+st_crs(University)
+
+NYPD_21_23_sf <- NYPD_21_23 %>%
+  select(CMPLNT_NUM, Latitude, Longitude)
+
+NYPD_21_23_sf <- st_as_sf(NYPD_21_23_sf, coords = c("Longitude", "Latitude"), crs = 4326)
+
+NYPD_21_23_sf <- st_transform(NYPD_21_23_sf, crs = 3857)
+
+
+NYPD_Bobst <- NYPD_21_23_sf[
+  apply(
+    st_intersects(NYPD_21_23_sf, Bobst, sparse = FALSE),
+    1, any), ] %>%
+  as.data.frame() %>%
+  select(-geometry)
+NYPD_Bobst <- left_join(NYPD_Bobst, NYPD_historic, copy = FALSE, by = "CMPLNT_NUM") %>%
+  group_by(year = year(RPT_DT)) %>%
+  count() %>%
+  mutate(building = "Bobst_PD")
+
+NYPD_Founders <- NYPD_21_23_sf[
+  apply(
+    st_intersects(NYPD_21_23_sf, Founders, sparse = FALSE),
+    1, any), ] %>%
+  as.data.frame() %>%
+  select(-geometry)
+NYPD_Founders <- left_join(NYPD_Founders, NYPD_historic, copy = FALSE, by = "CMPLNT_NUM") %>%
+  group_by(year = year(RPT_DT)) %>%
+  count() %>%
+  mutate(building = "Founders_PD")
+
+NYPD_Paulson <- NYPD_21_23_sf[
+  apply(
+    st_intersects(NYPD_21_23_sf, Paulson, sparse = FALSE),
+    1, any), ] %>%
+  as.data.frame() %>%
+  select(-geometry)
+NYPD_Paulson <- left_join(NYPD_Paulson, NYPD_historic, copy = FALSE, by = "CMPLNT_NUM") %>%
+  group_by(year = year(RPT_DT)) %>%
+  count() %>%
+  mutate(building = "Paulson_PD")
+
+NYPD_ThirdNorth <- NYPD_21_23_sf[
+  apply(
+    st_intersects(NYPD_21_23_sf, ThirdNorth, sparse = FALSE),
+    1, any), ] %>%
+  as.data.frame() %>%
+  select(-geometry)
+NYPD_ThirdNorth <- left_join(NYPD_ThirdNorth, NYPD_historic, copy = FALSE, by = "CMPLNT_NUM") %>%
+  group_by(year = year(RPT_DT)) %>%
+  count() %>%
+  mutate(building = "ThirdNorth_PD")
+
+NYPD_University <- NYPD_21_23_sf[
+  apply(
+    st_intersects(NYPD_21_23_sf, University, sparse = FALSE),
+    1, any), ] %>%
+  as.data.frame() %>%
+  select(-geometry)
+NYPD_University <- left_join(NYPD_University, NYPD_historic, copy = FALSE, by = "CMPLNT_NUM") %>%
+  group_by(year = year(RPT_DT)) %>%
+  count() %>%
+  mutate(building = "University_PD")
+
+NYPD_buildings <- bind_rows(NYPD_Bobst, NYPD_Founders, NYPD_Paulson, NYPD_ThirdNorth, NYPD_University)
+
+Clery_Bobst <- Clery_historic_21_23 %>%
+  filter(grepl("Bobst", Location)) %>%
+  group_by(year = year(Date)) %>%
+  count() %>%
+  mutate(building = "Bobst_Clery")
+
+Clery_Founders <- Clery_historic_21_23 %>%
+  filter(grepl("Founders", Location)) %>%
+  group_by(year = year(Date)) %>%
+  count() %>%
+  mutate(building = "Founders_Clery")
+
+Clery_Paulson <- Clery_historic_21_23 %>%
+  filter(grepl("Paulson", Location)) %>%
+  group_by(year = year(Date)) %>%
+  count() %>%
+  mutate(building = "Paulson_Clery")
+
+Clery_ThirdNorth <- Clery_historic_21_23 %>%
+  filter(str_detect(str_to_lower(Location), "third") &
+           !str_detect(str_to_lower(Location), "avenue")) %>%
+  group_by(year = year(Date)) %>%
+  count() %>%
+  mutate(building = "ThirdNorth_Clery")
+
+Clery_University <- Clery_historic_21_23 %>%
+  filter(str_detect(str_to_lower(Location), "universi") &
+           !str_detect(str_to_lower(Location), "place")) %>%
+  group_by(year = year(Date)) %>%
+  count() %>%
+  mutate(building = "University_Clery")
+
+Clery_buildings <- bind_rows(Clery_Bobst, Clery_Founders, Clery_Paulson, Clery_ThirdNorth, Clery_University)
+
+buildings <- bind_rows(Clery_buildings, NYPD_buildings) %>%
+  arrange(building)
+```
+
+#random evidences
+```{r}
+Clery_2023 %>%
+  group_by(Category) %>%
+  count() %>%
+  arrange(desc(n))
+
+#write.csv(NYPD_2022_Clery, "NYPD_2022_Clery.csv", row.names = FALSE)
+
+Clery_2022 %>%
+  filter(grepl("larceny", Category, ignore.case = TRUE)) %>%
+  filter(!str_detect(str_to_lower(Category), "reclassified")) %>%
+  group_by(Location) %>%
+  count() %>%
+  arrange(desc(n))
+
+Clery_2022 %>%
+  filter(grepl("harassment", Category, ignore.case = TRUE)) %>%
+  group_by(Location) %>%
+  count() %>%
+  arrange(desc(n))
+
+Clery_historic %>%
+  filter(grepl("larceny", Category, ignore.case = TRUE)) %>%
+  count()
+
+Clery_historic %>%
+  filter(grepl("harassment", Category, ignore.case = TRUE)) %>%
+  count()
+
+Clery_historic %>%
+  filter(grepl("Larceny", Category, ignore.case = TRUE)) %>%
+  group_by(Location) %>%
+  count() %>%
+  arrange(desc(n))
+
+Clery_historic %>%
+  filter(grepl("Harassment", Category, ignore.case = TRUE)) %>%
+  group_by(Location) %>%
+  count() %>%
+  arrange(desc(n))
+
+NYPD_historic %>%
+  filter(grepl("larceny", PD_DESC, ignore.case = TRUE)) %>%
+  count()
+
+NYPD_historic %>%
+  filter(grepl("harassment", PD_DESC, ignore.case = TRUE)) %>%
+  count()
+
+Clery_2023 %>%
+  filter(!grepl("violation", Category, ignore.case = TRUE)) %>%
+  filter(!grepl("trespass", Category, ignore.case = TRUE))
+
+NYPD_2022 %>%
+  filter(ADDR_PCT_CD %in% c("1", "5", "6", "7", "9")) %>%
+  filter(OFNS_DESC %in% c("RAPE", "ROBBERY", "GRAND LARCENY", "BURGLARY", "FELONY ASSAULT", "MURDER"))
+
+NYPD_2022_Clery %>%
+  as.data.frame() %>%
+  select(-geometry) %>%
+  filter(OFNS_DESC %in% c("RAPE", "ROBBERY", "GRAND LARCENY", "BURGLARY", "FELONY ASSAULT", "MURDER"))
+
+Clery_2022 %>%
+  filter(grepl("NYPD", Status, ignore.case = TRUE))
+
+NYPD_2022 %>%
+  filter(ADDR_PCT_CD %in% c("1", "5", "6", "7", "9")) %>%
+  filter(grepl("PETIT LARCENY", OFNS_DESC))
+
+NYPD_2022_Clery %>%
+  as.data.frame() %>%
+  select(-geometry) %>%
+  filter(grepl("PETIT LARCENY", OFNS_DESC))
+```
+
