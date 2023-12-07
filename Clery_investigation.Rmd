@@ -146,7 +146,7 @@ Clery_2023_address$Address[is.na(Clery_2023_address$Address)] <- "NA"
 
 library(ggmap)
 
-register_google("AIzaSyB6oP9TF4J4I978Ixyy1B501swrUvCGSFg")
+register_google("my_API_key")
 
 Clery_2023_address <- Clery_2023_address %>%
   mutate(geopoints = geocode(Address))
